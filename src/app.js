@@ -29,6 +29,14 @@ app.use(
 app.get('/', (req, res) => {
     res.status(200).json({ status: 'ok' });
 });
+// Health check - Dedicated endpoint for load balancer
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+    });
+});
 
 // Routes
 app.use('/v1', routes);
