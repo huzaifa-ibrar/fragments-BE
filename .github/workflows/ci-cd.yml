@@ -60,7 +60,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Check if AWS Secrets are configured
+        id: check-secrets
+        run: |
+          if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] || [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "⚠️  AWS Secrets not configured - skipping ECR push"
+            echo "    To enable: Go to GitHub → Settings → Secrets and variables → Actions"
+            echo "    Add: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_ACCOUNT_ID"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Configure AWS credentials
+        if: steps.check-secrets.outputs.skip == 'false'
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -68,10 +81,12 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
+        if: steps.check-secrets.outputs.skip == 'false'
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
       - name: Build Docker image
+        if: steps.check-secrets.outputs.skip == 'false'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
@@ -80,6 +95,7 @@ jobs:
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
       - name: Push image to Amazon ECR
+        if: steps.check-secrets.outputs.skip == 'false'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
@@ -89,6 +105,15 @@ jobs:
           echo "✅ Image pushed to ECR:"
           echo "   $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           echo "   $ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+      - name: ECR Push Status
+        if: always()
+        run: |
+          if [ "${{ steps.check-secrets.outputs.skip }}" == "true" ]; then
+            echo "⏭️  Skipped ECR push (secrets not configured)"
+          else
+            echo "✅ ECR push completed successfully"
+          fi
 
   # ============================================================================
   # CD: Deploy to ECS
@@ -100,7 +125,18 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     
     steps:
+      - name: Check if AWS Secrets are configured
+        id: check-secrets
+        run: |
+          if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] || [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "⚠️  AWS Secrets not configured - skipping ECS deployment"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Configure AWS credentials
+        if: steps.check-secrets.outputs.skip == 'false'
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -108,6 +144,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Update ECS service
+        if: steps.check-secrets.outputs.skip == 'false'
         run: |
           aws ecs update-service \
             --cluster fragments-cluster \
@@ -116,9 +153,20 @@ jobs:
             --region ${{ env.AWS_REGION }} 2>/dev/null || echo "⚠️  ECS service not found - create manually in AWS Console"
 
       - name: Wait for service to stabilize
+        if: steps.check-secrets.outputs.skip == 'false'
         run: |
           echo "⏳ Waiting for ECS service to stabilize..."
           aws ecs wait services-stable \
             --cluster fragments-cluster \
             --services fragments-api-service \
             --region ${{ env.AWS_REGION }} 2>/dev/null || echo "⚠️  Service check skipped - not yet deployed"
+
+      - name: ECS Deployment Status
+        if: always()
+        run: |
+          if [ "${{ steps.check-secrets.outputs.skip }}" == "true" ]; then
+            echo "⏭️  Skipped ECS deployment (secrets not configured)"
+            echo "    Once secrets are added, the next push will deploy to ECS"
+          else
+            echo "✅ ECS deployment completed"
+          fi
