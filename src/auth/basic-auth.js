@@ -9,7 +9,6 @@ passport.use(
       // Return user object with ownerId (used in Fragment)
       return done(null, { email: username, ownerId: username });
     }
-
     // fallback default dev user (optional)
     if (username === 'admin' && password === 'password') {
       return done(null, { email: username, ownerId: username });

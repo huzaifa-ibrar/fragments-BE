@@ -165,10 +165,9 @@ describe('Fragment class', () => {
     });
 
     test('create unsupported type throws 415', async () => {
-      await expect(Fragment.create('owner', 'application/octet-stream', Buffer.alloc(0))).rejects.toHaveProperty(
-        'status',
-        415
-      );
+      await expect(
+        Fragment.create('owner', 'application/octet-stream', Buffer.alloc(0))
+      ).rejects.toHaveProperty('status', 415);
     });
   });
 });

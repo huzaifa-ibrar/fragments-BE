@@ -46,20 +46,24 @@ Secure credential handling
 Proper tagging strategy
 Pull request support
 
-
 ## Docker Setup
 
 1. Build locally.
+
 ```bash
 docker build -t fragments .
+
+# docker build --no-cache -t fragments .
 ```
 
 2. Tag for Docker Hub:
+
 ```bash
 docker tag fragments YOUR_DOCKERHUB_USERNAME/fragments:latest
 ```
 
 3. Push manually (if needed):
+
 ```bash
 docker login
 docker push YOUR_DOCKERHUB_USERNAME/fragments:latest
@@ -76,4 +80,4 @@ Remember to:
 
 Replace YOUR_DOCKERHUB_USERNAME with your actual Docker Hub username
 Add the GitHub secrets for Docker Hub authentication
-Make sure your repository has the necessary permissions 
+Make sure your repository has the necessary permissions

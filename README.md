@@ -1,150 +1,609 @@
-# Assignment 1
+# Complete AWS Deployment Guide for Fragments Application
 
-Read through everything and give yourself enough time to complete this assignment. Students in previous semesters have often said that they needed more time than they initially thought. This will take much longer than the weekly labs. Schedule your time accordingly.
+This guide walks you through deploying your Fragments microservice on AWS with Docker, DynamoDB, and S3. Follow each step carefully!
 
-Please make sure that all of the following items have been successfully completed, based on the [Fragments Microservice Specification](../README.md) and your labs.
+---
 
-## API Server Checklist
+## 📋 Table of Contents
 
-- fragments git repo set up correctly (e.g., README, .gitignore, etc)
-- npm, eslint, prettier, scripts, and other dev environment settings set up correctly
-- properly formatted source code, with extraneous comments removed (e.g., `// TODO`)
-- structured logging with Pino, uses proper log levels throughout code (i.e., make sure you have used info, debug, warn, error logs everywhere). No `console.log()`.
-- API with express, middleware, routes, error handling set up correctly
-- environment variables properly managed via `dotenv`, `.env` files
-- no secrets or generated files included in git repos (i.e., only source code and config files)
-- unit testing using `jest` and `supertest` set up correctly
-- proper testing vs. development environment setup (configs, env, scripts)
-- test coverage reporting/scripts configured properly
-- GitHub Actions CI Workflow for eslint and unit tests set up correctly
-- all API routes use proper `/v1` version
-- all routes are secured using Passport.js based auth, configurable using either Cognito or Basic Auth
-- fragment data model working with In-Memory DB, with unit tests
-- success and error responses use correct JSON format, with unit tests. See 3.1, 3.2.
-- `GET /` returns a non-cacheable health check, with unit tests. See 4.1.
-- `POST /fragments` creates a fragment (only plain text support required at this point), with unit tests. See 4.3.
-- `GET /fragments` returns a list of the authenticated user's existing fragment IDs, if any. See 4.4.
-- `GET /fragments/:id` returns an existing fragment (only plain text support required at this point), with unit tests. See 4.5.
-- server deployed manually, and successfully running on AWS EC2 instance, configured via `.env` to use Amazon Cognito for user authorization
+1. [Prerequisites](#prerequisites)
+2. [AWS Account Setup](#aws-account-setup)
+3. [Create DynamoDB Table](#create-dynamodb-table)
+4. [Create S3 Bucket](#create-s3-bucket)
+5. [Create ECR Repository](#create-ecr-repository)
+6. [Create Cognito User Pool](#create-cognito-user-pool)
+7. [Setup IAM Roles](#setup-iam-roles)
+8. [Push Docker Image to ECR](#push-docker-image-to-ecr)
+9. [Create ECS Cluster](#create-ecs-cluster)
+10. [Deploy to ECS](#deploy-to-ecs)
+11. [Configure Frontend](#configure-frontend)
+12. [Testing](#testing)
 
-## Front-End Web Testing UI Checklist
+---
 
-- fragments-ui git repo set up correctly (e.g., README, .gitignore, etc)
-- npm, eslint, prettier, scripts and other dev environment settings set up correctly
-- Proper setup and use of a bundler (e.g., Parcel or framework like React, etc.)
-- basic web app working for manually testing API server
-- AWS Cognito Hosted Auth set up correctly
-- web app uses Cognito OAuth2 for user authentication/authorization
-- web app can be configured to use different back-end API servers (e.g., dev on localhost vs. prod on EC2 instance)
-- users are able to create a simple text fragment and have it get stored in the fragments server
-- web app running on localhost is able to use Amazon Cognito and the EC2 hosted backend server
+## 1. Prerequisites {#prerequisites}
 
-## Hints, Code, Tests
+**What you need installed:**
 
-Make sure you have implemented all of the hints, code, and tests below.
+- AWS Account (Free tier works!)
+- Docker Desktop
+- AWS CLI
+- Git
+- Your code ready
 
-- Implement an initial `fragments` data model in `src/model/*` with **unit tests**:
-  - Use an In-Memory Database backend to start (we will switch to AWS backend data stores later). See the provided implementation [src/model/data/memory/memory-db.js](src/model/data/memory/memory-db.js) and unit tests [tests/unit/memory-db.test.js](tests/unit/memory-db.test.js). Get these both integrated into your microservice and passing CI.
-  - Implement fragment database related calls using the In-Memory Database backend. See the provided implementation [src/model/data/memory/index.js](src/model/data/memory/index.js) and **write your own tests** for it in `test/unit/memory.test.js`. Make sure you cover all of the following `async` functions (i.e., they all return a `Promise`) and pass CI:
-    - `readFragment`
-    - `writeFragment`
-    - `readFragmentData`,
-    - `writeFragmentData`
-  - Add code to pick the appropriate back-end data strategy (we currently only have 1, our `memory` strategy, but we'll add ones for AWS later). Create `src/model/data/index.js` and have it re-export the `memory` module: `module.exports = require('./memory');`
-  - Implement a `Fragment` class to use your Data Model and In-Memory database. See implementation outline in [src/model/fragment.js](src/model/fragment.js) and complete tests in [tests/unit/fragment.test.js](tests/unit/fragment.test.js). Write the code implementation necessary to get all these tests passing in CI. This is an example of **Test Driven Development (TDD)**.
-- Write a `POST /fragments` route with **unit tests** using your `Fragment` class:
-  - Parse the `Content-Type` header using the [content-type](https://www.npmjs.com/package/content-type) module, and error/log on unknown types.
-  - Use the built-in [Express' `raw` body parser](http://expressjs.com/en/api.html#express.raw) to get a `Buffer` (i.e., raw binary data). We won't use `body-parser` or `express.json()`). Here's a hint:
+**Install AWS CLI (if not already installed):**
 
-    ```js
-    // Support sending various Content-Types on the body up to 5M in size
-    const rawBody = () =>
-      express.raw({
-        inflate: true,
-        limit: '5mb',
-        type: (req) => {
-          // See if we can parse this content type. If we can, `req.body` will be
-          // a Buffer (e.g., `Buffer.isBuffer(req.body) === true`). If not, `req.body`
-          // will be equal to an empty Object `{}` and `Buffer.isBuffer(req.body) === false`
-          const { type } = contentType.parse(req);
-          return Fragment.isSupportedType(type);
-        },
-      });
+**Windows:**
 
-    // Use a raw body parser for POST, which will give a `Buffer` Object or `{}` at `req.body`
-    // You can use Buffer.isBuffer(req.body) to test if it was parsed by the raw body parser.
-    router.post('/fragments', rawBody(), require('./post'));
-    ```
+```powershell
+# Download and run the AWS CLI installer
+# Go to: https://awscli.amazonaws.com/AWSCLIV2.msi
+# Or use chocolatey
+choco install awscliv2
+```
 
-  - Add an **environment variable**, `API_URL`, to allow you to configure your fragment microservice's URL when setting the `Location` header URL (i.e., when running locally it would be `http://localhost:8080`, but it will be different on AWS). TIP: you can use [`req.headers.host`](https://stackoverflow.com/questions/6503331/how-to-check-the-host-using-expressjs) to get the current host name and use that to create a new `URL()` for setting the `Location` header when `API_URL` is missing from the environment.
-  - Make sure you support `text/plain` fragments
-  - Your unit tests should include test cases for everything in the spec. Some examples to consider:
-    - authenticated vs unauthenticated requests (use HTTP Basic Auth, don't worry about Cognito in tests)
-    - authenticated users can create a plain text fragment
-    - responses include all necessary and expected properties (`id`, `created`, `type`, etc), and these values match what you expect for a given request (e.g., `size`, `type`, `ownerId`)
-    - POST response includes a `Location` header with a full URL to `GET` the created fragment
-    - trying to create a fragment with an unsupported type errors/logs as expected
+**Verify installation:**
 
-- Add appropriate **logging** to all of the code above. Make sure you include all of the following logs: `debug` logs (places where you need to get info about what's going on in order to debug a problem), `info` (places where regular operations are happening that you need to know about), `warn` (places where errors occur that you are handling), and `error` (places where an error is happening that you don't expect) logs.
+```powershell
+aws --version
+```
 
-- Work with a hashed email vs. plain text version for data privacy (i.e., what if our database gets compromised? We can store the user data without exposing their email):
-  - Add [src/hash.js](src/hash.js) and [tests/unit/hash.test.js](tests/unit/hash.test.js) to your project
-  - Use custom middleware to **hash** the user's email address on `req`:
-    - Add [src/auth/auth-middleware.js](src/auth/auth-middleware.js) to your project
-    - Update `src/auth/cognito.js` to use the custom authorize middleware:
+---
 
-      ```js
-      // modifications to src/auth/cognito.js
+## 2. AWS Account Setup {#aws-account-setup}
 
-      ...
-      // We'll use our authorize middle module
-      const authorize = require('./auth-middleware');
-      ...
-      // Previously we defined `authenticate()` like this:
-      // module.exports.authenticate = () => passport.authenticate('bearer', { session: false });
-      //
-      // Now we'll delegate the authorization to our authorize middleware
-      module.exports.authenticate = () => authorize('bearer');
-      ```
+### Step 2.1: Create AWS Account
 
-    - Update `src/auth/basic-auth.js` to use the custom authorize middleware:
+1. Go to [AWS Console](https://console.aws.amazon.com/)
+2. Click "Create an AWS Account"
+3. Follow the signup wizard
+4. Add a payment method (you'll use free tier)
 
-      ```js
-      // modifications to src/auth/basic-auth.js
+### Step 2.2: Configure AWS CLI
 
-      ...
-      // We'll use our authorize middle module
-      const authorize = require('./auth-middleware');
-      ...
-      // Previously we defined `authenticate()` like this:
-      // module.exports.authenticate = () => passport.authenticate('http', { session: false });
-      //
-      // Now we'll delegate the authorization to our authorize middleware
-      module.exports.authenticate = () => authorize('http');
-      ```
+Open PowerShell and run:
 
-- When everything is finished in both your `fragments` and `fragments-ui` projects for Assignment 1, you'll need to run it on an **Amazon EC2 instance** before you can submit. Doing so will require a few configuration changes:
-  - Start an existing EC2 instance, or create a new one. Get the correct **IPv4 DNS** for the instance. It will look something like `ec2-3-16-456-301.compute-1.amazonaws.com`, and the URL for your `fragments` web app running on this instance would be something like <http://ec2-3-16-456-301.compute-1.amazonaws.com:8080>. NOTE: this domain will change every time you stop/start the lab environment, so make sure you complete these steps in a single session; or use an [Elastic IP Address](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/elastic-ip-addresses-eip.html) with your EC2 instance to fix the IP and domain name between sessions (costs $0.20 per day).
-  - Configure your `fragments-ui` web app's `API_URL` environment variable to use the URL for your server running on EC2, for example: `API_URL=http://ec2-3-16-456-301.compute-1.amazonaws.com:8080`. TIP: you can also consider using `req.headers.host` to dynamically set the `API_URL` at runtime to the hostname being used.
-  - Your `fragments-ui` web app should now be able to connect to your Amazon Cognito User Pool and `fragments` server running on Amazon EC2.
+```powershell
+aws configure
+```
 
-## Submission
+You'll be prompted to enter:
 
-Create a proper Technical Report document (e.g., Word or PDF) and submit it to Blackboard. Your Technical Report must include:
+- **AWS Access Key ID**: Get from AWS Console → IAM → Users → Your User → Security Credentials
+- **AWS Secret Access Key**: Same location
+- **Default region**: `us-east-1` (or your preferred region)
+- **Default output format**: `json`
 
-- a title page
-- proper headings, sections, and page numbers
-- figures with labels (e.g., screenshots must include explanatory text)
+**How to get AWS Keys:**
 
-Your Technical Report document will discuss and demonstrate your progress to date on implementing the `fragments` service. In your report, include all of the following sections and items:
+1. Login to [AWS Console](https://console.aws.amazon.com/)
+2. Click your username (top right) → Security Credentials
+3. Click "Access Keys" → "Create access key"
+4. Copy the Access Key ID and Secret Access Key
+5. Run `aws configure` and paste them
 
-1. An introductory paragraph that describes the system you are building
-2. Links to both Private GitHub Repos. Your professor must be a collaborator in order to see them.
-3. Link to successful GitHub Actions CI workflow runs with eslint and all unit tests passing.
-4. Screenshots of the `fragments` API server running on an EC2 instance. Include a health check JSON response as well as the AWS EC2 URL in the browser
-5. Screenshots of the `fragments-ui` web app running on `localhost` authenticating with Amazon Cognito's Hosted UI
-6. Screenshots of the `fragments-ui` web app running on `localhost` successfully creating a text fragment via an HTTP `POST` to the `fragments` API server running on EC2. Show the network response in the Dev Tools and make sure the `Location` header and JSON metadata for the resulting fragment are clearly visible and labelled.
-7. Screenshot of running `npm run coverage` to show that you've been able to properly cover the majority of your files and lines of code. Make sure your coverage rate is high enough to reflect proper testing for all units of code (above 85% for all files), and that all expected source files are included.
-8. A concluding paragraph, including notes about any bugs or issues that you still need to address in subsequent releases.
+### Step 2.3: Create an S3 Bucket for Docker Images
 
-Your submission is worth 15% of your final grade, and should reflect that level of work.
+```powershell
+# Create a bucket (bucket names must be globally unique)
+aws s3 mb s3://my-fragments-app-YOURUSERNAME
+```
+
+---
+
+## 3. Create DynamoDB Table {#create-dynamodb-table}
+
+DynamoDB stores your fragment metadata. Follow these steps:
+
+### Step 3.1: Via AWS Console (Easiest for beginners)
+
+1. Open [AWS Console](https://console.aws.amazon.com/) → DynamoDB
+2. Click "Create table"
+3. Fill in these details:
+
+**General Information:**
+
+- **Table name**: `fragments`
+- **Partition key**: `ownerId` (String)
+- **Sort key**: `id` (String)
+
+**Billing Settings:**
+
+- Select: "Pay-per-request" (On-demand pricing)
+- Click "Create table"
+
+### Step 3.2: Verify Creation
+
+```powershell
+# List your DynamoDB tables
+aws dynamodb list-tables --region us-east-1
+```
+
+You should see `fragments` in the output.
+
+---
+
+## 4. Create S3 Bucket {#create-s3-bucket}
+
+S3 stores your fragment data (files).
+
+### Step 4.1: Create via AWS Console
+
+1. Open [AWS Console](https://console.aws.amazon.com/) → S3
+2. Click "Create bucket"
+3. Fill in:
+   - **Bucket name**: `fragments-data-YOURUSERNAME` (must be unique)
+   - **Region**: `us-east-1` (same as other services)
+4. **IMPORTANT**: Under "Block Public Access settings", keep all boxes **CHECKED** (private)
+5. Click "Create bucket"
+
+### Step 4.2: Verify Bucket Created
+
+```powershell
+# List your S3 buckets
+aws s3 ls
+```
+
+---
+
+## 5. Create ECR Repository {#create-ecr-repository}
+
+ECR (Elastic Container Registry) stores your Docker images.
+
+### Step 5.1: Via AWS Console
+
+1. Open [AWS Console](https://console.aws.amazon.com/) → ECR
+2. Click "Create repository"
+3. Fill in:
+   - **Repository name**: `fragments`
+   - **Image tag mutability**: Select "Immutable" (recommended)
+   - Leave other settings as default
+4. Click "Create repository"
+
+### Step 5.2: Note the Repository URI
+
+After creation, you'll see a URI like:
+
+```
+123456789012.dkr.ecr.us-east-1.amazonaws.com/fragments
+```
+
+**Save this URI - you'll need it later!**
+
+### Step 5.3: Setup Docker Authentication
+
+```powershell
+# Login Docker to ECR (from your project directory)
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-1.amazonaws.com
+```
+
+Replace `123456789012` with your AWS Account ID (12-digit number visible in AWS Console top right)
+
+---
+
+## 6. Create Cognito User Pool {#create-cognito-user-pool}
+
+Cognito handles user authentication.
+
+### Step 6.1: Create User Pool
+
+1. Open [AWS Console](https://console.aws.amazon.com/) → Cognito
+2. Click "Create user pool"
+3. Choose **Authentication provider options**:
+   - Select "Email"
+   - Keep default Cognito user pool sign-in options
+4. Click "Next"
+
+### Step 6.2: Configure Password Policy
+
+1. Select **"Custom"** for password policy
+2. Set minimum length to 8 (or lower for testing)
+3. Click "Next"
+
+### Step 6.3: Configure Account Recovery
+
+- Keep defaults
+- Click "Next"
+
+### Step 6.4: Message Delivery
+
+- Select "Send email with Cognito"
+- Click "Next"
+
+### Step 6.5: Name Your User Pool
+
+- **User pool name**: `fragments-users`
+- Click "Create user pool"
+
+### Step 6.6: Create App Client
+
+1. After creation, go to **"App integration"** → **"App clients and analytics"**
+2. Click "Create app client"
+3. Fill in:
+   - **App client name**: `fragments-app`
+   - **Client type**: "Web application"
+4. Scroll down and click "Create app client"
+
+### Step 6.7: Save Your Credentials
+
+After creation, you'll see:
+
+- **Client ID**: Copy this
+- **User Pool ID**: Copy this (from User Pool settings)
+
+Save these - you'll need them for the frontend!
+
+---
+
+## 7. Setup IAM Roles {#setup-iam-roles}
+
+IAM roles give your ECS tasks permission to access DynamoDB and S3.
+
+### Step 7.1: Create Task Execution Role
+
+1. Open [AWS Console](https://console.aws.amazon.com/) → IAM
+2. Click "Roles" → "Create role"
+3. Select **"AWS service"** as the trusted entity
+4. Choose **"Elastic Container Service"** → **"Elastic Container Service Task"**
+5. Click "Next"
+6. Under "Permissions policies", check:
+   - `AmazonECSTaskExecutionRolePolicy`
+7. Click "Next" → Name it: `ecsTaskExecutionRole`
+8. Click "Create role"
+
+### Step 7.2: Create Task Role (For App Access)
+
+1. Click "Create role" again
+2. Select **"AWS service"** → **"Elastic Container Service"** → **"Elastic Container Service Task"**
+3. Click "Next"
+4. Click "Create policy" button
+5. Select **"JSON"** tab and paste:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": "arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/fragments"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"],
+      "Resource": [
+        "arn:aws:s3:::fragments-data-YOURUSERNAME",
+        "arn:aws:s3:::fragments-data-YOURUSERNAME/*"
+      ]
+    }
+  ]
+}
+```
+
+Replace:
+
+- `ACCOUNT_ID` with your 12-digit AWS Account ID
+- `fragments-data-YOURUSERNAME` with your S3 bucket name
+
+6. Click "Next" → Name it: `fragments-app-policy`
+7. Click "Create policy"
+8. Go back to role creation, refresh, and select your new policy
+9. Click "Next" → Name it: `ecsTaskRole`
+10. Click "Create role"
+
+---
+
+## 8. Push Docker Image to ECR {#push-docker-image-to-ecr}
+
+### Step 8.1: Build Your Docker Image
+
+```powershell
+# Navigate to backend directory
+cd fragment_backend
+
+# Build the Docker image
+docker build -t fragments:latest .
+```
+
+Wait for the build to complete (might take 2-3 minutes).
+
+### Step 8.2: Tag the Image
+
+```powershell
+# Tag it for ECR (replace with your repository URI)
+docker tag fragments:latest 123456789012.dkr.ecr.us-east-1.amazonaws.com/fragments:latest
+```
+
+### Step 8.3: Push to ECR
+
+```powershell
+# Push to ECR
+docker push 123456789012.dkr.ecr.us-east-1.amazonaws.com/fragments:latest
+```
+
+**Verify in AWS Console:**
+
+1. Go to ECR → Repositories → fragments
+2. You should see your image listed!
+
+---
+
+## 9. Create ECS Cluster {#create-ecs-cluster}
+
+ECS runs your Docker containers on AWS.
+
+### Step 9.1: Create Cluster
+
+1. Open [AWS Console](https://console.aws.amazon.com/) → ECS
+2. Click "Clusters" → "Create cluster"
+3. Name your cluster: `fragments-cluster`
+4. **Infrastructure**: Select "AWS Fargate"
+5. Click "Create"
+
+Wait for creation (1-2 minutes).
+
+---
+
+## 10. Deploy to ECS {#deploy-to-ecs}
+
+### Step 10.1: Create Task Definition
+
+1. Go to ECS → "Task definitions" → "Create new task definition"
+2. Fill in:
+   - **Task definition family**: `fragments`
+   - **Launch type**: "AWS Fargate"
+   - **OS / Architecture**: Linux / x86_64
+   - **Task size**:
+     - CPU: 256 (.25 vCPU)
+     - Memory: 512 MB
+   - **Task execution role**: `ecsTaskExecutionRole` (created earlier)
+   - **Task role**: `ecsTaskRole` (created earlier)
+
+3. Under **Container - 1**:
+   - **Image URI**: `123456789012.dkr.ecr.us-east-1.amazonaws.com/fragments:latest`
+   - **Port mappings**: `8080:8080` (TCP)
+
+4. **Essential container**: Keep checked
+
+5. Under **Environment variables**, add:
+   - `NODE_ENV` = `production`
+   - `AWS_REGION` = `us-east-1`
+   - `AWS_COGNITO_POOL_ID` = your Cognito User Pool ID
+   - `AWS_COGNITO_CLIENT_ID` = your Cognito Client ID
+   - `AWS_S3_BUCKET_NAME` = `fragments-data-YOURUSERNAME`
+   - `AWS_DYNAMODB_TABLE_NAME` = `fragments`
+
+6. Click "Create"
+
+### Step 10.2: Create Service
+
+1. Go to your **fragments-cluster**
+2. Click **"Services"** tab → **"Create"**
+3. Fill in:
+   - **Launch type**: "FARGATE"
+   - **Task definition**: "fragments"
+   - **Service name**: `fragments-service`
+   - **Desired count**: 1 (for now)
+4. Click "Next"
+
+### Step 10.3: Configure Network
+
+1. **VPC**: Select default VPC
+2. **Subnets**: Select at least 2
+3. **Security groups**: Create new or use default
+   - Allow inbound traffic on port 8080
+4. **Load balancer type**: "Application Load Balancer"
+5. **Create new load balancer**: Yes
+   - **Load balancer name**: `fragments-alb`
+6. Click "Next"
+
+### Step 10.4: Configure Load Balancer
+
+1. **Target group protocol**: HTTP
+2. **Target group port**: 8080
+3. Create new target group: `fragments-tg`
+4. **Health check path**: `/health` (or `/api/health` if your app has this)
+5. Click "Next" → "Create service"
+
+Wait for service to start (3-5 minutes).
+
+### Step 10.5: Get Load Balancer URL
+
+1. Go to **EC2** → **Load Balancers**
+2. Find `fragments-alb`
+3. Copy the **DNS name** (looks like: `fragments-alb-123456.us-east-1.elb.amazonaws.com`)
+4. **Save this URL - it's your API endpoint!**
+
+### Step 10.6: Test Your API
+
+```powershell
+# Test your running API
+curl -X GET http://fragments-alb-123456.us-east-1.elb.amazonaws.com/health \
+  -H "Authorization: Basic YWRtaW46cGFzc3dvcmQ="
+```
+
+If you see a response, your backend is running! 🎉
+
+---
+
+## 11. Configure Frontend {#configure-frontend}
+
+Now point your React frontend to your AWS API.
+
+### Step 11.1: Update Frontend Environment
+
+Go to `fragment_frontend_30` directory and create `.env` file:
+
+```
+REACT_APP_API_URL=http://fragments-alb-123456.us-east-1.elb.amazonaws.com
+REACT_APP_COGNITO_DOMAIN=fragments-users-REGION.auth.REGION.amazoncognito.com
+REACT_APP_COGNITO_CLIENT_ID=YOUR_CLIENT_ID
+REACT_APP_COGNITO_REDIRECT_URI=http://localhost:3000
+```
+
+Replace with your actual values!
+
+### Step 11.2: Update api.js
+
+Open `src/api.js` and update the base URL:
+
+```javascript
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+```
+
+### Step 11.3: Run Frontend Locally
+
+```powershell
+cd fragment_frontend_30
+npm install
+npm start
+```
+
+---
+
+## 12. Testing {#testing}
+
+### Step 12.1: Test API Endpoints
+
+**Create a fragment:**
+
+```powershell
+$headers = @{
+    "Authorization" = "Basic YWRtaW46cGFzc3dvcmQ="
+    "Content-Type" = "text/plain"
+}
+
+$response = Invoke-WebRequest -Uri "http://fragments-alb-123456.us-east-1.elb.amazonaws.com/v1/fragments" `
+    -Method POST `
+    -Headers $headers `
+    -Body "Hello, AWS!"
+
+$response.Content | ConvertFrom-Json
+```
+
+**List fragments:**
+
+```powershell
+$headers = @{
+    "Authorization" = "Basic YWRtaW46cGFzc3dvcmQ="
+}
+
+Invoke-WebRequest -Uri "http://fragments-alb-123456.us-east-1.elb.amazonaws.com/v1/fragments" `
+    -Method GET `
+    -Headers $headers | Select-Object Content
+```
+
+### Step 12.2: Check CloudWatch Logs
+
+1. Go to **CloudWatch** → **Log groups**
+2. Find `/ecs/fragments`
+3. Click to view your API logs
+
+### Step 12.3: Verify DynamoDB Data
+
+1. Go to **DynamoDB** → **Tables** → **fragments**
+2. Click **"Explore table items"**
+3. You should see your fragments stored here!
+
+### Step 12.4: Verify S3 Data
+
+1. Go to **S3** → `fragments-data-YOURUSERNAME`
+2. You should see your fragment files stored here!
+
+---
+
+## Troubleshooting
+
+### Task is failing to start
+
+- Check **ECS** → **Tasks** → Click your task → View logs
+- Check **CloudWatch** logs for error messages
+- Verify environment variables are correct
+
+### Can't connect to API
+
+- Verify Load Balancer is in "Active" state
+- Check Security Group allows inbound traffic on port 8080
+- Check Target Group health check passes
+
+### DynamoDB/S3 Permission Denied
+
+- Verify IAM task role has correct permissions
+- Check bucket/table names in environment variables match actual names
+- Verify AWS_REGION environment variable is correct
+
+### Docker Build Fails
+
+- Make sure `.env` file exists or `.env.example` is present
+- Check all dependencies in `package.json` are compatible
+- Try: `docker build --no-cache -t fragments:latest .`
+
+---
+
+## Cost Management
+
+**Free tier includes:**
+
+- DynamoDB: 25 GB storage, 25 R/W capacity units
+- S3: 5 GB storage
+- ECR: 500 MB public/private
+- ECS: Free (you pay for compute)
+- ALB: ~$16/month
+- Cognito: 50,000 MAU free
+
+**To save money:**
+
+- Stop tasks when not using (ECS → Services → Update desired count to 0)
+- Monitor CloudWatch for unexpected usage
+- Use smaller container sizes (256 CPU, 512 MB RAM minimum)
+
+---
+
+## Summary of Deployed Architecture
+
+```
+                              ┌─────────────────┐
+                              │   Frontend      │
+                              │  (localhost:3000)│
+                              └────────┬─────────┘
+                                       │
+                              ┌────────▼────────┐
+                              │  AWS ALB        │
+                              │  (Load Balancer)│
+                              └────────┬────────┘
+                                       │
+                    ┌──────────────────┼──────────────────┐
+                    │                  │                  │
+            ┌───────▼──────┐  ┌───────▼──────┐  ┌───────▼──────┐
+            │  ECS Task 1  │  │  ECS Task 2  │  │  ECS Task 3  │
+            │ (Docker)     │  │ (Docker)     │  │ (Docker)     │
+            └───────┬──────┘  └───────┬──────┘  └───────┬──────┘
+                    │                  │                  │
+        ┌───────────┴──────────────────┼──────────────────┘
+        │                              │
+    ┌───▼──────────┐          ┌───────▼──────────┐
+    │  DynamoDB    │          │   S3 Bucket      │
+    │ (Metadata)   │          │   (Fragment Data)│
+    └──────────────┘          └──────────────────┘
+
+        Cognito User Pool (Authentication)
+```
+
+---
+
+## Next Steps
+
+1. Deploy backend to ECS
+2. Test API endpoints
+3. Run frontend locally against AWS backend
+4. Record video walkthrough
+5. Create submission document
+
+Congratulations! Your application is now running on AWS! 🚀

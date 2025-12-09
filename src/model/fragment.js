@@ -17,7 +17,15 @@ class Fragment {
     this.updated = updated || created;
   }
 
-  static validTypes = ['text/plain', 'text/markdown', 'application/json', 'image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+  static validTypes = [
+    'text/plain',
+    'text/markdown',
+    'application/json',
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+  ];
 
   static isSupportedType(type) {
     return Fragment.validTypes.includes(type.split(';')[0]);
@@ -56,7 +64,7 @@ class Fragment {
     if (this.isImage) {
       // All image types can be converted to other image formats
       const allImageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
-      formats.push(...allImageTypes.filter(type => type !== this.mimeType));
+      formats.push(...allImageTypes.filter((type) => type !== this.mimeType));
     }
 
     return formats;

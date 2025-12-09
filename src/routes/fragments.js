@@ -3,7 +3,7 @@ const contentType = require('content-type');
 const Fragment = require('../model/fragment');
 const basicAuth = require('../auth/basic-auth');
 const cognitoAuth = require('../auth/cognito');
-const convertFragment = require('../middleware/convert');
+const convert = require('../middleware/convert');
 
 const router = express.Router();
 
@@ -16,7 +16,7 @@ const rawBody = () =>
   express.raw({
     inflate: true,
     limit: '5mb',
-    type: ['text/*', 'application/json', 'image/*'], // Accept these content types
+    type: ['text/*', 'application/json', 'image/*'],
   });
 
 // POST /v1/fragments - create a new fragment
@@ -41,10 +41,7 @@ router.post('/fragments', express.json(), rawBody(), async (req, res, next) => {
     const fragment = await Fragment.create(req.user.ownerId, type, data);
 
     const base = process.env.API_URL || `http://${req.headers.host}`;
-    res
-      .status(201)
-      .set('Location', `${base}/v1/fragments/${fragment.id}`)
-      .json(fragment);
+    res.status(201).set('Location', `${base}/v1/fragments/${fragment.id}`).json(fragment);
   } catch (err) {
     next(err);
   }
@@ -70,14 +67,17 @@ router.get('/fragments/:id.:ext', async (req, res, next) => {
     }
 
     const data = await fragment.getData();
-    const { convertedData, contentType: convertedType } = await convertFragment(fragment, data, req.params.ext);
+    const { convertedData, contentType: convertedType } = await convert(
+      fragment,
+      data,
+      req.params.ext
+    );
 
     res.type(convertedType).send(convertedData);
   } catch (err) {
     next(err);
   }
 });
-
 
 // GET /v1/fragments/:id - return raw fragment data
 router.get('/fragments/:id', async (req, res, next) => {
@@ -97,7 +97,6 @@ router.get('/fragments/:id', async (req, res, next) => {
   }
 });
 
-
 // GET /v1/fragments/:id/info - return fragment metadata only
 router.get('/fragments/:id/info', async (req, res, next) => {
   try {
@@ -112,7 +111,6 @@ router.get('/fragments/:id/info', async (req, res, next) => {
     next(err);
   }
 });
-
 
 // GET /v1/fragments/:id/data - explicitly return raw fragment data
 router.get('/fragments/:id/data', async (req, res, next) => {

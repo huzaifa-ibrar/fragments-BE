@@ -4,7 +4,7 @@ const jwksRsa = require('jwks-rsa');
 const jwt = require('jsonwebtoken');
 const logger = require('../logger');
 
-const jwksUri = process.env.COGNITO_JWKS_URI || process.env.COGNITO_JWKS_URI;
+const jwksUri = process.env.COGNITO_JWKS_URI;
 let client;
 
 if (jwksUri) {
